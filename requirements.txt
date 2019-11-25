@@ -2,4 +2,5 @@ numpy
 matplotlib
 astropy
 lmfit
+numdifftools
 argh
