@@ -22,7 +22,7 @@ def get_waves(hdr, vacuum=False):
     return ran, waves
 
 
-def decompose_profile(x, x0, prf, prf_core, ngaus=4, nexp=4, win=100,
+def decompose_profile(x, x0, prf, prf_core, ngaus=2, nexp=3, win=100,
                       cocentered=False):
     "Model scattering function"
 
@@ -83,7 +83,46 @@ def decompose_profile(x, x0, prf, prf_core, ngaus=4, nexp=4, win=100,
     return model, comps, xx, scat
 
 
-def model_profile(prf, maxfrac=0.10, win=100, mode='gaussian', cocentered=False):
+def write_output(data, ofile, bin_wranges, bin_wcenters, verbose=False):
+    "Write stellar profile modeling results to the binary fits table."
+    nbins = len(data)
+    data = np.array(data)
+
+    xprfs = np.vstack(data[:, 0])
+    prfs = np.vstack(data[:, 1])
+    models = np.vstack(data[:, 2])
+    comps = np.stack(data[:,3])
+    xscat = np.vstack(data[:, 4])
+    scat = np.vstack(data[:, 5])
+    bin_wranges = np.array(bin_wranges)
+    bin_wcenters = np.array(bin_wcenters)
+    
+    columns = [
+        fits.Column(name='PRF_X', format="{}D".format(xprfs.shape[1]),
+                    array=xprfs),
+        fits.Column(name='PRF', format="{}D".format(prfs.shape[1]),
+                    array=prfs),
+        fits.Column(name='FIT', format="{}D".format(models.shape[1]),
+                    array=models),
+        fits.Column(name='FIT_COMPS', format="{}D".format(comps.shape[1]*comps.shape[2]),
+                    dim="({},{})".format(comps.shape[2], comps.shape[1]), array=comps),
+        fits.Column(name='PSF_SCAT_X', format="{}D".format(xscat.shape[1]),
+                    array=xscat),
+        fits.Column(name='PSF_SCAT_Y', format="{}D".format(scat.shape[1]),
+                    array=scat),
+        fits.Column(name='PARS_WAVE_RANGE', format="{}D".format(bin_wranges.shape[1]),
+                    array=bin_wranges),
+        fits.Column(name='PARS_WAVE_CENTER', format="D", array=bin_wcenters),
+    ]
+    htbl = fits.BinTableHDU.from_columns(columns)
+    htbl.name = 'PSF_SCATTERING'
+    if verbose:
+        print("Output binary table: {}".format(ofile))
+    htbl.writeto(ofile, overwrite=True)
+
+
+def model_profile(prf, maxfrac=0.10, win=100, mode='gaussian', cocentered=False,
+                  ngaus=2, nexp=3, plot=False):
     "Model profile and determine scattering function."
 
     xmax = np.argmax(prf)
@@ -109,42 +148,44 @@ def model_profile(prf, maxfrac=0.10, win=100, mode='gaussian', cocentered=False)
     prf_core = model_peak / np.sum(model_peak) * np.nansum(prf)
     model, comps, xscat, scat = \
         decompose_profile(x, model_res.params['center'].value, prf, prf_core,
-                          ngaus=2, nexp=3, win=win, cocentered=cocentered)
+                          ngaus=ngaus, nexp=nexp, win=win, cocentered=cocentered)
 
-    # print(comps.shape)
-    resid = prf - model
-    rms = np.nanstd(resid)
-    plt.close()
-    f = plt.figure(figsize=(12, 4))
-    ax1 = plt.subplot(121)
-    ax2 = plt.subplot(122)
-    for ax in ax1, ax2:
-        ax.plot(x, prf, color='k')
-        ax.plot(x, model_peak, color='C1')
+    if plot:
+        resid = prf - model
+        rms = np.nanstd(resid)
+        plt.close()
+        f = plt.figure(figsize=(12, 4))
+        ax1 = plt.subplot(121)
+        ax2 = plt.subplot(122)
+        for ax in ax1, ax2:
+            ax.plot(x, prf, color='k')
+            ax.plot(x, model_peak, color='C1')
 
-        for k in range(comps.shape[1]):
-            ax.plot(xscat+xmax, comps[:, k], color='red', lw=0.5)
-        ax.plot(xscat+xmax, scat, color='C0')
-        ax.plot(x, model, color='red')
-        ax.axvline(xmax, linestyle=':')
-        ax.axhline(maxfrac, linestyle=':', color='k')
-        ax.secondary_xaxis('top', functions=(
-            lambda x: x - xmax, lambda x: x + xmax))
+            for k in range(comps.shape[1]):
+                ax.plot(xscat+xmax, comps[:, k], color='red', lw=0.5)
+            ax.plot(xscat+xmax, scat, color='C0')
+            ax.plot(x, model, color='red')
+            ax.axvline(xmax, linestyle=':')
+            ax.axhline(maxfrac, linestyle=':', color='k')
+            ax.secondary_xaxis('top', functions=(
+                lambda x: x - xmax, lambda x: x + xmax))
 
-    
-    ax2.plot(x, resid - 5*rms)
-    ax2.axhline(-5*rms)
-    ax1.set_ylim(1e-6, 2)
-    ax1.set_xlim(xmax-win, xmax+win)
-    ax2.set_xlim(xmax-10, xmax+10)
-    # ax.xlim(xmax-10, xmax+10)
-    ax1.set_yscale('log')
-    
-    plt.show()
+        ax2.plot(x, resid - 5*rms)
+        ax2.axhline(-5*rms)
+        ax1.set_ylim(1e-6, 2)
+        ax1.set_xlim(xmax-win, xmax+win)
+        ax2.set_xlim(xmax-10, xmax+10)
+        # ax.xlim(xmax-10, xmax+10)
+        ax1.set_yscale('log')
+        plt.show()
+
+    return x, prf, model, comps, xscat, scat
 
 
-@argh.arg('file', type=str, help="Fits file with long-slit spectrum of the "
+@argh.arg('infile', type=str, help="Fits file with long-slit spectrum of the "
           "standard star. It has to be night sky removed.")
+@argh.arg('outfile', type=str, help="Fits file name where binary table with "
+          "output parameters will be stored.")
 @argh.arg('--ranges', nargs='+', type=float, help="Wavelength intervals of the "
           "bins where stellar profile will be analysed. Has to be even. "
           "[left1, right1, left2, right2, ...]")
@@ -155,15 +196,20 @@ def model_profile(prf, maxfrac=0.10, win=100, mode='gaussian', cocentered=False)
           "means that the peak profile where prf > 0.2*max is fitted.")
 @argh.arg('--mode', type=str, help="Defines model which used for non-scattered "
           "profile modeling. Default is `gaussian`. `moffat` is another option.")
+@argh.arg('--ngaus', type=int, help="Number of gaussian components described "
+          "scattering function.")
+@argh.arg('--nexp', type=int, help="Number of exponential components described "
+          "scattering function.")
 @argh.arg('-c', '--cocentered', help="Whether all component represented "
           "scattering function have the same central position.")
-def fit(file, ranges=[5500, 5600, 6060, 6200], win=100, maxfrac=0.10,
-        mode='gaussian', cocentered=False, verbose=True, plot=False):
+def fit(infile, outfile, ranges=[5500, 5600, 6060, 6200], win=100, maxfrac=0.10,
+        mode='gaussian', cocentered=False, ngaus=2, nexp=3, verbose=True,
+        plot=False):
     """
     Estimate scattering light profile using long-slit spectra of standard star.
     """
-    hdr = fits.getheader(file)
-    spec = fits.getdata(file)
+    hdr = fits.getheader(infile)
+    spec = fits.getdata(infile)
     wrange, waves = get_waves(hdr)
 
     # some checks
@@ -172,12 +218,19 @@ def fit(file, ranges=[5500, 5600, 6060, 6200], win=100, maxfrac=0.10,
         )
     nbins = len(ranges) // 2
 
-    print(spec.shape)
+    outdata = []
+    bin_wranges = []
+    bin_wcenters = []
     for i in range(nbins):
         idxbin = (waves >= ranges[2*i]) & (waves <= ranges[2*i+1])
         prf = np.nansum(spec[:, idxbin], axis=1)
-        model_profile(prf, maxfrac=maxfrac, mode=mode, win=win,
-                      cocentered=cocentered)
+        out = model_profile(
+            prf, maxfrac=maxfrac, mode=mode, win=win, cocentered=cocentered,
+            ngaus=ngaus, nexp=nexp, plot=plot)
+        outdata.append(out)
+        bin_wranges.append([waves[idxbin][0], waves[idxbin][-1]])
+        bin_wcenters.append(0.5 * (waves[idxbin][0] + waves[idxbin][-1]))
+    write_output(outdata, outfile, bin_wranges, bin_wcenters, verbose=True)
 
 
 parser = argh.ArghParser()
