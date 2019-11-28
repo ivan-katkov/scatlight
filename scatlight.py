@@ -83,7 +83,7 @@ def decompose_profile(x, x0, prf, prf_core, ngaus=2, nexp=3, win=100,
     return model, comps, xx, scat
 
 
-def write_output(data, ofile, bin_wranges, bin_wcenters, verbose=False):
+def write_output(data, bin_wranges, bin_wcenters, ofile=None, verbose=False):
     "Write stellar profile modeling results to the binary fits table."
     nbins = len(data)
     data = np.array(data)
@@ -96,7 +96,7 @@ def write_output(data, ofile, bin_wranges, bin_wcenters, verbose=False):
     scat = np.vstack(data[:, 5])
     bin_wranges = np.array(bin_wranges)
     bin_wcenters = np.array(bin_wcenters)
-    
+
     columns = [
         fits.Column(name='PRF_X', format="{}D".format(xprfs.shape[1]),
                     array=xprfs),
@@ -184,8 +184,9 @@ def model_profile(prf, maxfrac=0.10, win=100, mode='gaussian', cocentered=False,
 
 @argh.arg('infile', type=str, help="Fits file with long-slit spectrum of the "
           "standard star. It has to be night sky removed.")
-@argh.arg('outfile', type=str, help="Fits file name where binary table with "
-          "output parameters will be stored.")
+@argh.arg('-o', '--ofile', type=str, help="Fits file name where binary table "
+          "with output parameters will be stored. If not specified than "
+          "`_psfscat` will be added to the fits file.")
 @argh.arg('--ranges', nargs='+', type=float, help="Wavelength intervals of the "
           "bins where stellar profile will be analysed. Has to be even. "
           "[left1, right1, left2, right2, ...]")
@@ -202,7 +203,7 @@ def model_profile(prf, maxfrac=0.10, win=100, mode='gaussian', cocentered=False,
           "scattering function.")
 @argh.arg('-c', '--cocentered', help="Whether all component represented "
           "scattering function have the same central position.")
-def fit(infile, outfile, ranges=[5500, 5600, 6060, 6200], win=100, maxfrac=0.10,
+def fit(infile, ofile=None, ranges=[5500, 5600, 6060, 6200], win=100, maxfrac=0.10,
         mode='gaussian', cocentered=False, ngaus=2, nexp=3, verbose=True,
         plot=False):
     """
@@ -230,7 +231,10 @@ def fit(infile, outfile, ranges=[5500, 5600, 6060, 6200], win=100, maxfrac=0.10,
         outdata.append(out)
         bin_wranges.append([waves[idxbin][0], waves[idxbin][-1]])
         bin_wcenters.append(0.5 * (waves[idxbin][0] + waves[idxbin][-1]))
-    write_output(outdata, outfile, bin_wranges, bin_wcenters, verbose=True)
+
+    if ofile is None:
+        ofile = infile.replace('.fits', '_psfscat.fits')
+    write_output(outdata, bin_wranges, bin_wcenters, ofile=ofile, verbose=True)
 
 
 parser = argh.ArghParser()
