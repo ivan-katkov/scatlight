@@ -4,3 +4,4 @@ astropy
 lmfit
 numdifftools
 argh
+tqdm

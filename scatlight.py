@@ -183,7 +183,8 @@ def plot(file, binnum='all', pdf=None, yrange=[1e-6, 2]):
 
         if pdf is not None:
             p.savefig(f)
-    p.close()
+            p.close()
+
     plt.show()
 
 
@@ -303,8 +304,80 @@ def fit(infile, ofile=None, ranges=[5500, 5600, 6060, 6200], win=100, maxfrac=0.
     write_output(outdata, bin_wranges, bin_wcenters, ofile=ofile, verbose=True)
 
 
+def interp_prf(wcenters, prfs):
+    """
+    Interpolate scattering light profile for given lambda useing all spectral
+    bins. It uses constant interpolation before first and after last spectral
+    bin.
+    """
+    from scipy.interpolate import interp2d
+    print(prfs.shape)
+    return interp2d(wcenters)
+    
+
+
+@argh.arg('image', type=str, help="Input image which used to estimate"
+          "scattering light ")
+@argh.arg('scat_profile', type=str, help="Input binary table with results of "
+          "the scattering light profile analysis.")
+def jopa(image, scat_profile):
+    """
+    Calculate scattering light image and substract it from given file. 
+    Science spectrum and standard star spectrum must have the same Y axis 
+    bining.
+    """
+    from tqdm import tqdm
+    from scipy.interpolate import interp2d
+
+    img = fits.getdata(image)
+    hdr = fits.getheader(image)
+    prf = fits.getdata(scat_profile, 'PSF_SCATTERING')
+
+    prfs = prf['PSF_SCAT_Y']
+    wcenters = prf['PARS_WAVE_CENTER']
+    nbins = wcenters.size
+
+    _, waves = get_waves(hdr)
+    
+    f = interp2d(np.arange(prfs.shape[1]), wcenters, prfs)
+
+    scat_image = np.zeros_like(img)
+
+    print("Scattering light for each column...")
+    for i in tqdm(range(img.shape[1])):
+        if waves[i] <= wcenters[0]:
+            kernel = CustomKernel(prfs[0, :])
+        elif waves[i] >= wcenters[-1]:
+            kernel = CustomKernel(prfs[-1, :])
+        else:
+            kernel = CustomKernel(f(f.x, waves[i]))
+
+        scat_image[:, i] = convolve(img[:, i], kernel, normalize_kernel=False,
+                                    boundary='wrap')
+
+    print("Smooth scattering light along the dispersion direction...")
+    kern_disp = CustomKernel(np.sum(prfs, axis=0)/nbins)
+    for j in tqdm(range(img.shape[0])):
+        scat_image[j, :] = convolve(scat_image[j, :], kernel,
+                                    normalize_kernel=True)
+
+    # save file with scattering light
+    ofile = image.replace('.fits', '_scatlight.fits')
+    print("Write scattering light file: {}".format(ofile))
+    hdr['HISTORY'] = ("Create scattering light image based on the {} using "
+                      "profile {}".format(image, scat_profile))
+    fits.PrimaryHDU(data=scat_image, header=hdr).writeto(ofile, overwrite=True)
+
+    # substract from image
+    oimfile = image.replace('.fits', '_scat_substr.fits')
+    print("Write image without with substracted scattering light: {}".format(oimfile))
+    hdr['HISTORY'] = "Substract scattereing light."
+    fits.PrimaryHDU(data=img - scat_image, header=hdr).writeto(
+        oimfile, overwrite=True)
+
+
 parser = argh.ArghParser()
-parser.add_commands([fit, plot])
+parser.add_commands([fit, plot, jopa])
 
 if __name__ == '__main__':
     parser.dispatch()
