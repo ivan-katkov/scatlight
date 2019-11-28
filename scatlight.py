@@ -94,6 +94,9 @@ def write_output(data, bin_wranges, bin_wcenters, ofile=None, verbose=False):
     comps = np.stack(data[:,3])
     xscat = np.vstack(data[:, 4])
     scat = np.vstack(data[:, 5])
+    xmaxs = np.vstack(data[:, 6])
+    maxfracs = np.vstack(data[:, 7])
+    wins = np.vstack(data[:, 8])
     bin_wranges = np.array(bin_wranges)
     bin_wcenters = np.array(bin_wcenters)
 
@@ -113,12 +116,75 @@ def write_output(data, bin_wranges, bin_wcenters, ofile=None, verbose=False):
         fits.Column(name='PARS_WAVE_RANGE', format="{}D".format(bin_wranges.shape[1]),
                     array=bin_wranges),
         fits.Column(name='PARS_WAVE_CENTER', format="D", array=bin_wcenters),
+        fits.Column(name='PARS_MAX_POS', format="I", array=xmaxs),
+        fits.Column(name='PARS_MAXFRAC', format="D", array=maxfracs),
+        fits.Column(name='PARS_WIN', format="D", array=wins),
     ]
     htbl = fits.BinTableHDU.from_columns(columns)
     htbl.name = 'PSF_SCATTERING'
     if verbose:
         print("Output binary table: {}".format(ofile))
     htbl.writeto(ofile, overwrite=True)
+
+
+@argh.arg('-b', '--binnum', type=str, help="Which spectral bins should be "
+          "plotted. Using default value `all` will generate plots for all "
+          "bins. More than one bins might be specified like `0,2,5` (without "
+          "spaces!)")
+@argh.arg('-p', '--pdf', type=str, help="Output multi-page pdf file.")
+@argh.arg('-y', '--yrange', type=float, nargs=2,
+          help="Y-axis range of the plots.")
+def plot(file, binnum='all', pdf=None, yrange=[1e-6, 2]):
+    "Plot figures of stellar profile analysis."
+
+    d = fits.getdata(file, 'PSF_SCATTERING')
+    nbins = len(d)
+    if binnum == 'all':
+        bins = np.arange(nbins)
+    elif ',' in binnum:
+        bins = np.array(binnum.split(',')).astype(int)
+    else:
+        bins = np.array([binnum])
+
+    print("Make plots for spectral bins: {}".format(bins))
+
+    plt.close()
+    if pdf is not None:
+        print("Write multi-page pdf: {}".format(pdf))
+        from matplotlib.backends.backend_pgf import PdfPages
+        p = PdfPages(pdf)
+
+    for bn in bins:
+        xmax = d[bn]['PARS_MAX_POS']
+        wcenter = d[bn]['PARS_WAVE_CENTER']
+        wrange = d[bn]['PARS_WAVE_RANGE']
+        maxfrac = d[bn]['PARS_MAXFRAC']
+        win = d[bn]['PARS_WIN']
+
+        f = plt.figure()
+        ax = f.add_subplot()
+
+        ax.plot(d[bn]['PRF_X']-xmax, d[bn]['PRF'], color='k')
+        comps = d[bn]['FIT_COMPS']
+        for k in range(comps.shape[1]):
+            ax.plot(d[bn]['PSF_SCAT_X'], comps[:, k], color='C1', lw=0.5)
+        ax.plot(d[bn]['PSF_SCAT_X'], d[bn]['PSF_SCAT_Y'], color='C0')
+        ax.plot(d[bn]['PRF_X']-xmax, d[bn]['FIT'], color='red')
+
+        ax.axvline(0, linestyle=':')
+        ax.axhline(maxfrac, linestyle=':')
+        ax.set_yscale('log')
+        ax.set_xlim(-win, win)
+        ax.set_ylim(yrange)
+        ax.set_title(r"Bin {}  $\lambda$ {:.1f}  $\Delta \lambda$ "
+                      "{:.1f}-{:.1f}".format(bn, wcenter, wrange[0], wrange[1]))
+        ax.secondary_xaxis('top', functions=(lambda x: x + xmax, 
+                                             lambda x: x - xmax))
+
+        if pdf is not None:
+            p.savefig(f)
+    p.close()
+    plt.show()
 
 
 def model_profile(prf, maxfrac=0.10, win=100, mode='gaussian', cocentered=False,
@@ -179,7 +245,7 @@ def model_profile(prf, maxfrac=0.10, win=100, mode='gaussian', cocentered=False,
         ax1.set_yscale('log')
         plt.show()
 
-    return x, prf, model, comps, xscat, scat
+    return x, prf, model, comps, xscat, scat, xmax, maxfrac, win
 
 
 @argh.arg('infile', type=str, help="Fits file with long-slit spectrum of the "
@@ -238,7 +304,7 @@ def fit(infile, ofile=None, ranges=[5500, 5600, 6060, 6200], win=100, maxfrac=0.
 
 
 parser = argh.ArghParser()
-parser.add_commands([fit])
+parser.add_commands([fit, plot])
 
 if __name__ == '__main__':
     parser.dispatch()
