@@ -15,6 +15,8 @@ To estimate scattering light profile one needs reference star spectrum and good 
 
 ## Example
 
+<img src="https://github.com/ivan-katkov/scatlight/blob/master/pic_example.png" width="30%" height="30%" alt="Example of scattered light calculation">
+
 The top panel shows the light profile of a reference star along the slit (black colour) which was used for the scattered light component calculation.
 The red line represents the result of the convolution of an atmospheric PSF (green lines) with the model of the instrumental PSF component fscat (blue lines).
 Two different parameterizations for the atmospheric PSF have been used.
